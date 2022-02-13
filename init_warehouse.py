@@ -24,6 +24,7 @@ class WarehouseAnnotator:
         CLEAR_STACK = 'clear stack'
         SET_ENTRY = 'set entry'
         SET_EXIT = 'set exit'
+        SET_ITEMS = 'set items'
 
     def __init__(self, grid_size: int, img_size: int, save_dir: str, anno_path: str or None):
         if img_size // grid_size == 0:
@@ -37,6 +38,7 @@ class WarehouseAnnotator:
         self._mask = np.zeros((self._grid_size, self._grid_size), dtype=bool)
         self._entry_point = None
         self._exit_point = None
+        self._items_points = []
 
         if anno_path is not None:
             self._load_anno(file_path=anno_path)
@@ -47,6 +49,7 @@ class WarehouseAnnotator:
         self._current_mouse_position = None
         self._grid_color = (160, 160, 160)
         self._stack_color = (235, 125, 52)
+        self._items_color = (0, 0, 0)
         self._entry_color = (51, 255, 0)
         self._exit_color = (0, 64, 255)
         self._cursor_color = (52, 103, 235)
@@ -56,7 +59,8 @@ class WarehouseAnnotator:
             self.Mode.DRAW_STACK: '1',
             self.Mode.CLEAR_STACK: '2',
             self.Mode.SET_ENTRY: '3',
-            self.Mode.SET_EXIT: '4'
+            self.Mode.SET_EXIT: '4',
+            self.Mode.SET_ITEMS: '5'
         }
 
         self._logger = logging.getLogger('WarehouseAnnotator')
@@ -69,6 +73,7 @@ class WarehouseAnnotator:
         self._entry_point = anno['entry_point']
         self._exit_point = anno['exit_point']
         self._mask = np.asarray(anno['mask'], dtype=bool)
+        self._items_points = anno['item_points']
 
     def start(self):
         self._worker()
@@ -84,8 +89,9 @@ class WarehouseAnnotator:
                 self._last_mouse_point.append((x, y))
                 self._change_mask()
             elif self._current_mode in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
-                self._last_mouse_point = [(x, y)]
-                self._set_entry_or_exit()
+                self._set_entry_or_exit((x, y))
+            elif self._current_mode is self.Mode.SET_ITEMS:
+                self._set_items((x, y))
         elif event == cv2.EVENT_MOUSEMOVE:
             self._current_mouse_position = (x, y)
 
@@ -113,7 +119,7 @@ class WarehouseAnnotator:
         if self._current_mode is None:
             return
 
-        dx, dy = self._img_size + 5, 220
+        dx, dy = self._img_size + 5, 240
         lines = ['--- Current mode ---',  f'{self._current_mode.value}']
         for line in lines:
             cv2.putText(img, line, (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._stack_color, 1)
@@ -218,24 +224,46 @@ class WarehouseAnnotator:
             elif self._current_mode is self.Mode.CLEAR_STACK:
                 self._clear_stacks(x0, y0, x1, y1)
 
-    def _set_entry_or_exit(self):
-        if len(self._last_mouse_point) == 0 or self._current_mode not in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
-            return
+    def _set_entry_or_exit(self, point):
+        if len(point) == 0 or self._current_mode not in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
+            raise RuntimeError('Impossible!')
 
-        x, y = self._last_mouse_point[0]
-        x, y = x // self._grid_step, y // self._grid_step
+        x, y = point[0] // self._grid_step, point[1] // self._grid_step
         if self._current_mode is self.Mode.SET_ENTRY:
             self._entry_point = (x, y)
         else:
             self._exit_point = (x, y)
 
+    def _set_items(self, point):
+        if len(point) == 0 or self._current_mode != self.Mode.SET_ITEMS:
+            raise RuntimeError('Impossible!')
+
+        x, y = point[0] // self._grid_step, point[1] // self._grid_step
+        if self._mask[x, y] != 1:
+            self._logger.error('The item can only be placed on the stack')
+            return
+
+        for point_idx, point in enumerate(self._items_points):
+            if point[0] == x and point[1] == y:
+                del self._items_points[point_idx]
+                return
+
+        self._items_points.append((x, y))
+
     def _draw_annotations(self, img):
-        columns, rows = np.where(self._mask)
-        for r, c in zip(rows, columns):
+        def draw_polygon(mask_cords: list or tuple, color: tuple):
+            c, r = mask_cords
             x0, x1 = c * self._grid_step, (c + 1) * self._grid_step
             y0, y1 = r * self._grid_step, (r + 1) * self._grid_step
             pts = np.asarray([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=int)
-            cv2.fillPoly(img, pts=[pts], color=self._stack_color)
+            cv2.fillPoly(img, pts=[pts], color=color)
+
+        columns, rows = np.where(self._mask)
+        for r, c in zip(rows, columns):
+            draw_polygon((c, r), self._stack_color)
+
+        for point in self._items_points:
+            draw_polygon(point, self._items_color)
 
         if self._entry_point is not None:
             c, r = self._entry_point
@@ -268,7 +296,8 @@ class WarehouseAnnotator:
             'grid_size': int(self._grid_size),
             'entry_point': list(self._entry_point),
             'exit_point': list(self._exit_point),
-            'mask': [[int(v) for v in m] for m in self._mask]
+            'mask': [[int(v) for v in m] for m in self._mask],
+            'item_points': list(self._items_points)
         }
         with open(save_path, 'w', encoding='utf-8') as file:
             json.dump(data, file, indent=4, ensure_ascii=False)
@@ -309,6 +338,9 @@ class WarehouseAnnotator:
                 self._last_mouse_point = []
             elif key == ord(self._select_mode_definitions[self.Mode.SET_EXIT]):
                 self._current_mode = self.Mode.SET_EXIT
+                self._last_mouse_point = []
+            elif key == ord(self._select_mode_definitions[self.Mode.SET_ITEMS]):
+                self._current_mode = self.Mode.SET_ITEMS
                 self._last_mouse_point = []
 
 
