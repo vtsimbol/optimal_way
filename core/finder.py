@@ -1,13 +1,9 @@
-import argparse
+
 import json
 
 import numpy as np
 
 from utils import Visualizer
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--input_file', type=str, required=True, help='The path to the warehouse annotation')
-args = parser.parse_args()
 
 
 class WayFinder:
@@ -72,8 +68,3 @@ class WayFinder:
 
     def __call__(self):
         pass
-
-
-if __name__ == '__main__':
-    finder = WayFinder(anno_path=args.input_file)
-    finder()
