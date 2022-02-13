@@ -13,7 +13,8 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--grid_size', type=int, default=50)
 parser.add_argument('--img_size', type=int, default=1000)
-parser.add_argument('--output_dir', type=str, default=None)
+parser.add_argument('--output_dir', type=str, default=None, help='The path to the directory for saving schemas')
+parser.add_argument('--input_file', type=str, default=None, help='The path to the saved warehouse schema')
 args = parser.parse_args()
 
 
@@ -24,7 +25,7 @@ class WarehouseAnnotator:
         SET_ENTRY = 'set entry'
         SET_EXIT = 'set exit'
 
-    def __init__(self, grid_size: int, img_size: int, save_dir: str):
+    def __init__(self, grid_size: int, img_size: int, save_dir: str, anno_path: str or None):
         if img_size // grid_size == 0:
             raise ValueError('Please, increase image size or decrease grid size')
 
@@ -33,10 +34,13 @@ class WarehouseAnnotator:
         self._save_dir = save_dir
 
         self._grid_step = img_size // grid_size
-
         self._mask = np.zeros((self._grid_size, self._grid_size), dtype=bool)
         self._entry_point = None
         self._exit_point = None
+
+        if anno_path is not None:
+            self._load_anno(file_path=anno_path)
+
         self._current_mode = self.Mode.DRAW_STACK
 
         self._last_mouse_point = []
@@ -56,6 +60,15 @@ class WarehouseAnnotator:
         }
 
         self._logger = logging.getLogger('WarehouseAnnotator')
+
+    def _load_anno(self, file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            anno = json.load(file)
+
+        self._grid_size = anno['grid_size']
+        self._entry_point = anno['entry_point']
+        self._exit_point = anno['exit_point']
+        self._mask = np.asarray(anno['mask'], dtype=bool)
 
     def start(self):
         self._worker()
@@ -253,7 +266,6 @@ class WarehouseAnnotator:
         save_path = os.path.join(self._save_dir, f'{datetime.now().strftime("%d%m%Y_%H%M%S")}.json')
         data = {
             'grid_size': int(self._grid_size),
-            'grid_step': int(self._grid_step),
             'entry_point': list(self._entry_point),
             'exit_point': list(self._exit_point),
             'mask': [[int(v) for v in m] for m in self._mask]
@@ -302,5 +314,8 @@ class WarehouseAnnotator:
 
 if __name__ == '__main__':
     output_dir = args.output_dir if args.output_dir is not None else str(Path(__file__).parent)
-    annotator = WarehouseAnnotator(grid_size=args.grid_size, img_size=args.img_size, save_dir=output_dir)
+    annotator = WarehouseAnnotator(grid_size=args.grid_size,
+                                   img_size=args.img_size,
+                                   save_dir=output_dir,
+                                   anno_path=args.input_file)
     annotator.start()
