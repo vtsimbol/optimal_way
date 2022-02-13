@@ -23,7 +23,7 @@ class Way:
         weight = self._STEP_POINT_WEIGHT if point_type is self.PointType.STEP else self._STEP_ROTATE_POINT_WEIGHT
         point = self.Point(x=x, y=y, point_type=point_type, weight=weight)
         self._points.append(point)
-        
+
     def get_metrics(self):
         total_weights = 0
         for point in self._points:

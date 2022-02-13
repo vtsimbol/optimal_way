@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 
+from .pathfinder import Pathfinder
 from utils import Visualizer
 
 
@@ -16,6 +17,7 @@ class WayFinder:
         self._item_points = warehouse_data['item_points']
         self._entry_point = warehouse_data['entry_point']
         self._exit_point = warehouse_data['exit_point']
+        self._pathfinder = Pathfinder(stacks_mask=self._stacks)
 
     @staticmethod
     def _load(file_path):
