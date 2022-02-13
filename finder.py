@@ -1,7 +1,6 @@
 import argparse
 import json
 
-import cv2
 import numpy as np
 
 from utils import Visualizer
