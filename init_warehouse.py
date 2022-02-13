@@ -35,7 +35,7 @@ class WarehouseAnnotator:
         self._save_dir = save_dir
 
         self._grid_step = img_size // grid_size
-        self._mask = np.zeros((self._grid_size, self._grid_size), dtype=bool)
+        self._stacks_mask = np.zeros((self._grid_size, self._grid_size), dtype=bool)
         self._entry_point = None
         self._exit_point = None
         self._items_points = []
@@ -72,7 +72,7 @@ class WarehouseAnnotator:
         self._grid_size = anno['grid_size']
         self._entry_point = anno['entry_point']
         self._exit_point = anno['exit_point']
-        self._mask = np.asarray(anno['mask'], dtype=bool)
+        self._stacks_mask = np.asarray(anno['stacks_mask'], dtype=bool)
         self._items_points = anno['item_points']
 
     def start(self):
@@ -87,7 +87,7 @@ class WarehouseAnnotator:
                 if len(self._last_mouse_point) >= 2:
                     self._last_mouse_point = []
                 self._last_mouse_point.append((x, y))
-                self._change_mask()
+                self._change_stacks_mask()
             elif self._current_mode in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
                 self._set_entry_or_exit((x, y))
             elif self._current_mode is self.Mode.SET_ITEMS:
@@ -179,7 +179,7 @@ class WarehouseAnnotator:
         return img
 
     def _set_new_stack(self, x0, y0, x1, y1):
-        temp_mask = np.array(self._mask.copy(), dtype=int)
+        temp_stacks_mask = np.array(self._stacks_mask.copy(), dtype=int)
 
         if x0 == x1 and y0 == y1:
             self._last_mouse_point = []
@@ -190,26 +190,26 @@ class WarehouseAnnotator:
             return
 
         if x0 == x1:
-            temp_mask[x0, y0:y1] += 1
+            temp_stacks_mask[x0, y0:y1] += 1
         else:
-            temp_mask[x0:x1, y0] += 1
+            temp_stacks_mask[x0:x1, y0] += 1
 
-        if np.max(temp_mask) > 1:
+        if np.max(temp_stacks_mask) > 1:
             self._last_mouse_point = []
             return
 
         if x0 == x1:
-            self._mask[x0, y0:y1 + 1] = ~self._mask[x0, y0:y1 + 1]
+            self._stacks_mask[x0, y0:y1 + 1] = ~self._stacks_mask[x0, y0:y1 + 1]
         else:
-            self._mask[x0:x1 + 1, y0] = ~self._mask[x0:x1 + 1, y0]
+            self._stacks_mask[x0:x1 + 1, y0] = ~self._stacks_mask[x0:x1 + 1, y0]
 
         self._last_mouse_point = []
 
     def _clear_stacks(self, x0, y0, x1, y1):
         roi = np.zeros((2, 2), dtype=int)
-        self._mask[x0:x1 + 1, y0:y1 + 1] = False
+        self._stacks_mask[x0:x1 + 1, y0:y1 + 1] = False
 
-    def _change_mask(self):
+    def _change_stacks_mask(self):
         if len(self._last_mouse_point) == 2:
             x0 = np.minimum(self._last_mouse_point[0][0], self._last_mouse_point[1][0])
             y0 = np.minimum(self._last_mouse_point[0][1], self._last_mouse_point[1][1])
@@ -239,7 +239,7 @@ class WarehouseAnnotator:
             raise RuntimeError('Impossible!')
 
         x, y = point[0] // self._grid_step, point[1] // self._grid_step
-        if self._mask[x, y] != 1:
+        if self._stacks_mask[x, y] != 1:
             self._logger.error('The item can only be placed on the stack')
             return
 
@@ -251,14 +251,14 @@ class WarehouseAnnotator:
         self._items_points.append((x, y))
 
     def _draw_annotations(self, img):
-        def draw_polygon(mask_cords: list or tuple, color: tuple):
-            c, r = mask_cords
+        def draw_polygon(stacks_mask_cords: list or tuple, color: tuple):
+            c, r = stacks_mask_cords
             x0, x1 = c * self._grid_step, (c + 1) * self._grid_step
             y0, y1 = r * self._grid_step, (r + 1) * self._grid_step
             pts = np.asarray([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=int)
             cv2.fillPoly(img, pts=[pts], color=color)
 
-        columns, rows = np.where(self._mask)
+        columns, rows = np.where(self._stacks_mask)
         for r, c in zip(rows, columns):
             draw_polygon((c, r), self._stack_color)
 
@@ -287,7 +287,7 @@ class WarehouseAnnotator:
             self._logger.error('Please, set the exit from the warehouse')
             return False
 
-        if np.sum(self._mask) == 0:
+        if np.sum(self._stacks_mask) == 0:
             self._logger.error('Please, set the stacks in the warehouse')
             return False
 
@@ -296,7 +296,7 @@ class WarehouseAnnotator:
             'grid_size': int(self._grid_size),
             'entry_point': list(self._entry_point),
             'exit_point': list(self._exit_point),
-            'mask': [[int(v) for v in m] for m in self._mask],
+            'stacks_mask': [[int(v) for v in m] for m in self._stacks_mask],
             'item_points': list(self._items_points)
         }
         with open(save_path, 'w', encoding='utf-8') as file:
