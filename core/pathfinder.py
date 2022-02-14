@@ -7,10 +7,10 @@ class Pathfinder:
         self._found_ways = []
 
     def start(self, point1, point2):
-        x0, y0 = point1
-        x1, y1 = point2
-        if self._stacks_mask[x0, y0] == 1 or self._stacks_mask[x1, y1] == 1:
-            raise ValueError('Incorrect point')
+        # x0, y0 = point1
+        # x1, y1 = point2
+        # if self._stacks_mask[x0, y0] == 1 or self._stacks_mask[x1, y1] == 1:
+        #     raise ValueError('Incorrect point')
 
         self._found_ways = []
         previous_steps_mask = self._stacks_mask.copy()
@@ -28,7 +28,7 @@ class Pathfinder:
             return None
 
         x0, y0 = np.maximum(xc - 1, 0), np.maximum(yc - 1, 0)
-        x1, y1 = np.minimum(xc + 1, stacks_mask.shape[0] - 1), np.minimum(yc + 1, stacks_mask.shape[1] - 1)
+        x1, y1 = np.minimum(xc + 1, self._stacks_mask.shape[0] - 1), np.minimum(yc + 1, self._stacks_mask.shape[1] - 1)
         roi = available_pts[x0:x1 + 1, y0:y1 + 1]
 
         x_indices, y_indices = np.where(roi)

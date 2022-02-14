@@ -1,4 +1,4 @@
-
+from itertools import permutations
 import json
 
 import numpy as np
@@ -68,5 +68,37 @@ class WayFinder:
             'item_points': item_points
         }
 
-    def __call__(self):
-        pass
+    def __call__(self, show=True):
+        print('Finding the best way from the entry and exit points to each item')
+        ways_from_entry_to_item = {}
+        ways_from_item_to_exit = {}
+        for i, item_point in enumerate(self._item_points):
+            ways_from_entry_to_item[item_point] = self._pathfinder.start(self._entry_point.copy(), item_point.copy())
+            ways_from_item_to_exit[item_point] = self._pathfinder.start(item_point.copy(), self._exit_point.copy())
+
+        print('Finding the best way between items')
+        ways_between_items = {}
+        for points in permutations(self._item_points, 2):
+            ways_between_items[points] = self._pathfinder.start(points[0].copy(), points[1].copy())
+
+        print('Getting best way')
+        number_of_items = len(self._item_points)
+        full_ways = []
+        metrics = []
+        for points_sequence in permutations(self._item_points, number_of_items):
+            full_ways.append(ways_from_entry_to_item[points_sequence[0]])
+
+            for i in range(number_of_items - 1):
+                start_point = points_sequence[i]
+                finish_point = points_sequence[i + 1]
+                full_ways.append(ways_between_items[(start_point, finish_point)])
+
+            full_ways.append(ways_from_item_to_exit[points_sequence[-1]])
+            total_points_in_way = 0
+            for way in full_ways:
+                total_points_in_way += len(way)
+            metrics.append(total_points_in_way)
+
+        best_way_idx = np.argmin(metrics)
+        best_way = full_ways[best_way_idx]
+        return best_way
