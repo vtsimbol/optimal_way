@@ -1,5 +1,5 @@
 from datetime import datetime
-from itertools import permutations
+from itertools import permutations, combinations
 import json
 from multiprocessing import Process, Pipe
 import os
@@ -141,6 +141,35 @@ class WayFinder:
 
         return None, None
 
+    def _get_results_from_workers(self, processes, pipes, timestamps):
+        num_workers = len(processes)
+        ways = [None for _ in range(num_workers)]
+        statuses = [False for _ in range(num_workers)]
+
+        while True:
+            time.sleep(1)
+            for i in range(num_workers):
+                if statuses[i]:
+                    continue
+
+                ret, data = self._poll_worker(processes[i], pipes[i], timestamps[i])
+                if ret is not None:
+                    if ret is False:
+                        raise RuntimeError('Way not found!')
+
+                    ways[i] = data
+                    statuses[i] = True
+
+            if np.sum(statuses) == num_workers:
+                break
+
+        return ways
+
+    @staticmethod
+    def _check_way(way):
+        if way is None or (isinstance(way, list) and len(way) == 0):
+            raise RuntimeError('Way not found!')
+
     def _get_ways_from_one_point_to_others(self, main_point, another_points, reverse: bool):
         processes, pipes, timestamps = [], [], []
         for point in another_points:
@@ -153,25 +182,36 @@ class WayFinder:
             pipes.append(pipe)
             timestamps.append(timestamp)
 
-        ways = []
-        num_workers = len(processes)
-        statuses = [False for _ in range(num_workers)]
-        while True:
-            time.sleep(3)
-            for i in range(num_workers):
-                if statuses[i]:
-                    continue
+        ways = self._get_results_from_workers(processes, pipes, timestamps)
 
-                ret, data = self._poll_worker(processes[i], pipes[i], timestamps[i])
-                if ret is not None:
-                    print(f'Worker#{i}: {ret} {data}')
-                    ways.append(None if ret is False else data)
-                    statuses[i] = True
+        result = {}
+        for i, way in enumerate(ways):
+            self._check_way(way)
+            result[f'{i}'] = way
+        return result
 
-            if np.sum(statuses) == num_workers:
-                break
+    def _get_ways_between_points(self, points):
+        processes, pipes, timestamps = [], [], []
+        point_indices = []
+        for pts_idx in combinations(list(range(len(points))), 2):
+            p1_idx, p2_idx = pts_idx[0], pts_idx[1]
+            process, pipe, timestamp = self._start_pathfinder_worker(points[p1_idx], points[p2_idx])
 
-        return ways
+            processes.append(process)
+            pipes.append(pipe)
+            timestamps.append(timestamp)
+            point_indices.append((p1_idx, p2_idx))
+
+        ways = self._get_results_from_workers(processes, pipes, timestamps)
+
+        result = {}
+        for pts_idx, way in zip(point_indices, ways):
+            self._check_way(way)
+            min_idx, max_idx = np.min(pts_idx), np.max(pts_idx)
+            result[f'{min_idx}{max_idx}'] = way
+            result[f'{max_idx}{min_idx}'] = way
+
+        return result
 
     def __call__(self, show=True):
         print('Finding the best way from the entry point to each item')
@@ -188,23 +228,22 @@ class WayFinder:
                                                                              reverse=True)
 
         print('Finding the best way between items')
-        ways_between_items = {}
-        for points in permutations(self._item_points, 2):
-            ways_between_items[points] = self._pathfinder.start(points[0].copy(), points[1].copy())
+        ways_between_items = self._get_ways_between_points(self._item_points)
 
         print('Getting best way')
         number_of_items = len(self._item_points)
+        point_indices = list(range(number_of_items))
         full_ways = []
         metrics = []
-        for points_sequence in permutations(self._item_points, number_of_items):
-            full_ways.append(ways_from_entry_to_item[points_sequence[0]])
+        for pts_idx in permutations(point_indices, number_of_items):
+            full_ways.append(ways_from_entry_to_item[f'{pts_idx[0]}'])
 
             for i in range(number_of_items - 1):
-                start_point = points_sequence[i]
-                finish_point = points_sequence[i + 1]
-                full_ways.append(ways_between_items[(start_point, finish_point)])
+                start_point_idx = pts_idx[i]
+                finish_point_idx = pts_idx[i + 1]
+                full_ways.append(ways_between_items[f'{start_point_idx}{finish_point_idx}'])
 
-            full_ways.append(ways_from_item_to_exit[points_sequence[-1]])
+            full_ways.append(ways_from_item_to_exit[f'{pts_idx[-1]}'])
             total_points_in_way = 0
             for way in full_ways:
                 total_points_in_way += len(way)
@@ -212,4 +251,5 @@ class WayFinder:
 
         best_way_idx = np.argmin(metrics)
         best_way = full_ways[best_way_idx]
+        print(best_way)
         return best_way
