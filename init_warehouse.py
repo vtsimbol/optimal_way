@@ -21,10 +21,11 @@ args = parser.parse_args()
 class WarehouseAnnotator:
     class Mode(Enum):
         DRAW_STACK = 'draw stack'
-        CLEAR_STACK = 'clear stack'
+        CLEAR_STACK_OR_WALL = 'clear stack or wall'
         SET_ENTRY = 'set entry'
         SET_EXIT = 'set exit'
         SET_ITEMS = 'set items'
+        SET_WALLS = 'set walls'
 
     def __init__(self, grid_size: int, img_size: int, save_dir: str, anno_path: str or None):
         if img_size // grid_size == 0:
@@ -39,6 +40,7 @@ class WarehouseAnnotator:
         self._entry_point = None
         self._exit_point = None
         self._items_points = []
+        self._walls_mask = np.zeros((self._grid_size, self._grid_size), dtype=bool)
 
         if anno_path is not None:
             self._load_anno(file_path=anno_path)
@@ -52,15 +54,17 @@ class WarehouseAnnotator:
         self._items_color = (0, 0, 0)
         self._entry_color = (51, 255, 0)
         self._exit_color = (0, 64, 255)
+        self._walls_color = (64, 64, 64)
         self._cursor_color = (52, 103, 235)
         self._info_text_color = (222, 252, 255)
 
         self._select_mode_definitions = {
             self.Mode.DRAW_STACK: '1',
-            self.Mode.CLEAR_STACK: '2',
+            self.Mode.CLEAR_STACK_OR_WALL: '2',
             self.Mode.SET_ENTRY: '3',
             self.Mode.SET_EXIT: '4',
-            self.Mode.SET_ITEMS: '5'
+            self.Mode.SET_ITEMS: '5',
+            self.Mode.SET_WALLS: '6'
         }
 
         self._logger = logging.getLogger('WarehouseAnnotator')
@@ -73,6 +77,7 @@ class WarehouseAnnotator:
         self._entry_point = anno['entry_point']
         self._exit_point = anno['exit_point']
         self._stacks_mask = np.asarray(anno['stacks_mask'], dtype=bool)
+        self._walls_mask - np.asarray(anno['walls_mask'], dtype=bool)
         self._items_points = anno['item_points']
 
     def start(self):
@@ -83,15 +88,18 @@ class WarehouseAnnotator:
             return
 
         if event == cv2.EVENT_LBUTTONDOWN:
-            if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.CLEAR_STACK]:
+            if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.CLEAR_STACK_OR_WALL, self.Mode.SET_WALLS]:
                 if len(self._last_mouse_point) >= 2:
                     self._last_mouse_point = []
                 self._last_mouse_point.append((x, y))
-                self._change_stacks_mask()
+                self._change_masks(is_stacks_mask=self._current_mode != self.Mode.SET_WALLS)
+
             elif self._current_mode in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
                 self._set_entry_or_exit((x, y))
+
             elif self._current_mode is self.Mode.SET_ITEMS:
                 self._set_items((x, y))
+
         elif event == cv2.EVENT_MOUSEMOVE:
             self._current_mouse_position = (x, y)
 
@@ -119,14 +127,14 @@ class WarehouseAnnotator:
         if self._current_mode is None:
             return
 
-        dx, dy = self._img_size + 5, 240
+        dx, dy = self._img_size + 5, 260
         lines = ['--- Current mode ---',  f'{self._current_mode.value}']
         for line in lines:
             cv2.putText(img, line, (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._stack_color, 1)
             dy += 20
 
         dy += 50
-        if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.CLEAR_STACK]:
+        if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.CLEAR_STACK_OR_WALL]:
             cv2.putText(img, 'Stacks:', (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._stack_color, 1)
             dy += 20
             if len(self._last_mouse_point) == 0:
@@ -145,6 +153,12 @@ class WarehouseAnnotator:
             cv2.putText(img, 'Exit:', (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._exit_color, 1)
             dy += 20
             cv2.putText(img, 'Set exit point', (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._exit_color, 1)
+
+        dy += 50
+        if np.sum(self._walls_mask) == 0:
+            cv2.putText(img, 'Walls:', (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._info_text_color, 1)
+            dy += 20
+            cv2.putText(img, 'Set walls', (dx, dy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self._info_text_color, 1)
 
     def _draw_grid(self, img):
         offset = self._grid_step
@@ -170,15 +184,15 @@ class WarehouseAnnotator:
                        pt2=(self._img_size, grid_row * self._grid_step + half_grid_step),
                        color=self._cursor_color, thickness=1)
 
-        if self._current_mode is self.Mode.DRAW_STACK and len(self._last_mouse_point) > 0:
+        if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.SET_WALLS] and len(self._last_mouse_point) > 0:
             grid_column0 = self._last_mouse_point[0][0] // self._grid_step
             grid_row0 = self._last_mouse_point[0][1] // self._grid_step
-            text = f'({np.abs(grid_column - grid_column0)}, {np.abs(grid_row - grid_row0)})'
+            text = f'({np.abs(grid_column - grid_column0) + 1}, {np.abs(grid_row - grid_row0) + 1})'
             cv2.putText(img, text, (x + self._grid_step, y + self._grid_step), cv2.FONT_HERSHEY_SIMPLEX, 1, self._cursor_color, 1)
 
         return img
 
-    def _set_new_stack(self, x0, y0, x1, y1):
+    def _set_new_area_on_mask(self, x0, y0, x1, y1, is_stacks_mask):
         temp_stacks_mask = np.array(self._stacks_mask.copy(), dtype=int)
 
         if x0 == x1 and y0 == y1:
@@ -199,17 +213,23 @@ class WarehouseAnnotator:
             return
 
         if x0 == x1:
-            self._stacks_mask[x0, y0:y1 + 1] = ~self._stacks_mask[x0, y0:y1 + 1]
+            if is_stacks_mask:
+                self._stacks_mask[x0, y0:y1 + 1] = ~self._stacks_mask[x0, y0:y1 + 1]
+            else:
+                self._walls_mask[x0, y0:y1 + 1] = ~self._walls_mask[x0, y0:y1 + 1]
         else:
-            self._stacks_mask[x0:x1 + 1, y0] = ~self._stacks_mask[x0:x1 + 1, y0]
+            if is_stacks_mask:
+                self._stacks_mask[x0:x1 + 1, y0] = ~self._stacks_mask[x0:x1 + 1, y0]
+            else:
+                self._walls_mask[x0:x1 + 1, y0] = ~self._walls_mask[x0:x1 + 1, y0]
 
         self._last_mouse_point = []
 
-    def _clear_stacks(self, x0, y0, x1, y1):
-        roi = np.zeros((2, 2), dtype=int)
+    def _clear_area_on_mask(self, x0, y0, x1, y1):
         self._stacks_mask[x0:x1 + 1, y0:y1 + 1] = False
+        self._walls_mask[x0:x1 + 1, y0:y1 + 1] = False
 
-    def _change_stacks_mask(self):
+    def _change_masks(self, is_stacks_mask):
         if len(self._last_mouse_point) == 2:
             x0 = np.minimum(self._last_mouse_point[0][0], self._last_mouse_point[1][0])
             y0 = np.minimum(self._last_mouse_point[0][1], self._last_mouse_point[1][1])
@@ -219,10 +239,10 @@ class WarehouseAnnotator:
             x0, y0 = x0 // self._grid_step, y0 // self._grid_step
             x1, y1 = x1 // self._grid_step, y1 // self._grid_step
 
-            if self._current_mode is self.Mode.DRAW_STACK:
-                self._set_new_stack(x0, y0, x1, y1)
-            elif self._current_mode is self.Mode.CLEAR_STACK:
-                self._clear_stacks(x0, y0, x1, y1)
+            if self._current_mode in [self.Mode.DRAW_STACK, self.Mode.SET_WALLS]:
+                self._set_new_area_on_mask(x0, y0, x1, y1, is_stacks_mask)
+            elif self._current_mode is self.Mode.CLEAR_STACK_OR_WALL:
+                self._clear_area_on_mask(x0, y0, x1, y1)
 
     def _set_entry_or_exit(self, point):
         if len(point) == 0 or self._current_mode not in [self.Mode.SET_ENTRY, self.Mode.SET_EXIT]:
@@ -262,6 +282,10 @@ class WarehouseAnnotator:
         for r, c in zip(rows, columns):
             draw_polygon((c, r), self._stack_color)
 
+        columns, rows = np.where(self._walls_mask)
+        for r, c in zip(rows, columns):
+            draw_polygon((c, r), self._walls_color)
+
         for point in self._items_points:
             draw_polygon(point, self._items_color)
 
@@ -279,6 +303,9 @@ class WarehouseAnnotator:
             cv2.line(img, (x1, y0), (x0, y1), self._exit_color, 2)
 
     def _save(self):
+        def numpy_2d_array_to_list_with_ints(array):
+            return [[int(v) for v in m] for m in array]
+
         if self._entry_point is None:
             self._logger.error('Please, set the entry to the warehouse')
             return False
@@ -291,12 +318,17 @@ class WarehouseAnnotator:
             self._logger.error('Please, set the stacks in the warehouse')
             return False
 
+        if np.sum(self._walls_mask) == 0:
+            self._logger.error('Please, set the walls in the warehouse')
+            return False
+
         save_path = os.path.join(self._save_dir, f'{datetime.now().strftime("%d%m%Y_%H%M%S")}.json')
         data = {
             'grid_size': int(self._grid_size),
             'entry_point': list(self._entry_point),
             'exit_point': list(self._exit_point),
-            'stacks_mask': [[int(v) for v in m] for m in self._stacks_mask],
+            'stacks_mask': numpy_2d_array_to_list_with_ints(self._stacks_mask),
+            'walls_mask': numpy_2d_array_to_list_with_ints(self._walls_mask),
             'item_points': list(self._items_points)
         }
         with open(save_path, 'w', encoding='utf-8') as file:
@@ -327,21 +359,31 @@ class WarehouseAnnotator:
                 exit()
             if key == ord('s'):
                 self._save()
-            elif key == ord(self._select_mode_definitions[self.Mode.DRAW_STACK]):
-                self._current_mode = self.Mode.DRAW_STACK
-                self._last_mouse_point = []
-            elif key == ord(self._select_mode_definitions[self.Mode.CLEAR_STACK]):
-                self._current_mode = self.Mode.CLEAR_STACK
-                self._last_mouse_point = []
-            elif key == ord(self._select_mode_definitions[self.Mode.SET_ENTRY]):
-                self._current_mode = self.Mode.SET_ENTRY
-                self._last_mouse_point = []
-            elif key == ord(self._select_mode_definitions[self.Mode.SET_EXIT]):
-                self._current_mode = self.Mode.SET_EXIT
-                self._last_mouse_point = []
-            elif key == ord(self._select_mode_definitions[self.Mode.SET_ITEMS]):
-                self._current_mode = self.Mode.SET_ITEMS
-                self._last_mouse_point = []
+            else:
+                for k, v in self._select_mode_definitions.items():
+                    if key == ord(v):
+                        self._current_mode = k
+                        self._last_mouse_point = []
+                        break
+
+            # elif key == ord(self._select_mode_definitions[self.Mode.DRAW_STACK]):
+            #     self._current_mode = self.Mode.DRAW_STACK
+            #     self._last_mouse_point = []
+            # elif key == ord(self._select_mode_definitions[self.Mode.CLEAR_STACK_OR_WALL]):
+            #     self._current_mode = self.Mode.CLEAR_STACK_OR_WALL
+            #     self._last_mouse_point = []
+            # elif key == ord(self._select_mode_definitions[self.Mode.SET_ENTRY]):
+            #     self._current_mode = self.Mode.SET_ENTRY
+            #     self._last_mouse_point = []
+            # elif key == ord(self._select_mode_definitions[self.Mode.SET_EXIT]):
+            #     self._current_mode = self.Mode.SET_EXIT
+            #     self._last_mouse_point = []
+            # elif key == ord(self._select_mode_definitions[self.Mode.SET_ITEMS]):
+            #     self._current_mode = self.Mode.SET_ITEMS
+            #     self._last_mouse_point = []
+            # elif key == ord(self._select_mode_definitions[self.Mode.SET_WALLS]):
+            #     self._current_mode = self.Mode.SET_WALLS
+            #     self._last_mouse_point = []
 
 
 if __name__ == '__main__':
