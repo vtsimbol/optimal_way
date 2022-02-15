@@ -11,6 +11,7 @@ class Visualizer:
         self._items_color = (0, 0, 0)
         self._entry_color = (51, 255, 0)
         self._exit_color = (0, 64, 255)
+        self._walls_mask = (64, 64, 64)
 
     def draw_warehouse(self, data):
         def draw_polygon(stacks_mask_cords: list or tuple, color: tuple):
@@ -22,6 +23,7 @@ class Visualizer:
 
         grid_size = data['grid_size']
         stacks_mask = data['stacks_mask']
+        walls_mask = data['walls_mask']
         entry_point = data['entry_point']
         exit_point = data['exit_point']
         items_points = data['item_points']
@@ -29,10 +31,13 @@ class Visualizer:
         w, h = grid_size[0] * self._grid_step, grid_size[1] * self._grid_step
         img = np.ones((h, w, 3), dtype=np.uint8) * 255
 
-        # draw stacks
+        # draw stacks and walls
         columns, rows = np.where(stacks_mask)
         for r, c in zip(rows, columns):
             draw_polygon((c, r), self._stack_color)
+        columns, rows = np.where(walls_mask)
+        for r, c in zip(rows, columns):
+            draw_polygon((c, r), self._walls_mask)
 
         # draw items
         for point in items_points:
