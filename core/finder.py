@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 
+from .logger import get_logger
 from .pathfinder import Pathfinder
 from utils import Visualizer
 
@@ -28,10 +29,7 @@ class WayFinder:
         self._pathfinder_mask = np.logical_or(self._stacks, self._walls)
         self._PATHFINDER_WORKER_TIMEOUT = 15 * 60
 
-        # import cv2
-        # img = self._visualizer.draw_warehouse(warehouse_data)
-        # cv2.imshow('test', img)
-        # cv2.waitKey(0)
+        self._logger = get_logger('WayFinder')
 
     @staticmethod
     def _load(file_path):
@@ -214,12 +212,12 @@ class WayFinder:
         return result
 
     def __call__(self, show=True):
-        print('Finding the best way from the entry point to each item')
+        self._logger.info('Finding the best way from the entry point to each item')
         ways_from_entry_to_item = self._get_ways_from_one_point_to_others(main_point=self._entry_point,
                                                                           another_points=self._item_points,
                                                                           reverse=False)
 
-        print('Finding the best way from the exit point to each item')
+        self._logger.info('Finding the best way from the exit point to each item')
         if self._entry_point[0] == self._exit_point[0] and self._entry_point[1] == self._exit_point[1]:
             ways_from_item_to_exit = ways_from_entry_to_item.copy()
         else:
@@ -227,10 +225,10 @@ class WayFinder:
                                                                              another_points=self._item_points,
                                                                              reverse=True)
 
-        print('Finding the best way between items')
+        self._logger.info('Finding the best way between items')
         ways_between_items = self._get_ways_between_points(self._item_points)
 
-        print('Getting best way')
+        self._logger.info('Getting best way')
         number_of_items = len(self._item_points)
         point_indices = list(range(number_of_items))
         full_ways = []
@@ -251,5 +249,6 @@ class WayFinder:
 
         best_way_idx = np.argmin(metrics)
         best_way = full_ways[best_way_idx]
-        print(best_way)
+
+        self._logger.info(best_way)
         return best_way
