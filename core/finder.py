@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 
+import cv2
 import numpy as np
 
 from .logger import get_logger
@@ -17,14 +18,14 @@ from utils import Visualizer
 class WayFinder:
     def __init__(self, anno_path: str):
         warehouse_anno = self._load(anno_path)
-        warehouse_data = self._init_warehouse(warehouse_anno)
+        self._warehouse_data = self._init_warehouse(warehouse_anno)
 
-        self._visualizer = Visualizer(grid_step=10)
-        self._stacks = warehouse_data['stacks_mask']
-        self._walls = warehouse_data['walls_mask']
-        self._item_points = warehouse_data['item_points']
-        self._entry_point = warehouse_data['entry_point']
-        self._exit_point = warehouse_data['exit_point']
+        self._visualizer = Visualizer(grid_step=20)
+        self._stacks = self._warehouse_data['stacks_mask']
+        self._walls = self._warehouse_data['walls_mask']
+        self._item_points = self._warehouse_data['item_points']
+        self._entry_point = self._warehouse_data['entry_point']
+        self._exit_point = self._warehouse_data['exit_point']
 
         self._pathfinder_mask = np.logical_or(self._stacks, self._walls)
         self._PATHFINDER_WORKER_TIMEOUT = 15 * 60
@@ -50,11 +51,11 @@ class WayFinder:
             x1, y1 = np.max(points[:, 0]), np.max(points[:, 1])
             return [x0, y0, x1, y1]
 
-        entry_point = np.asarray(data['entry_point'], dtype=int)
-        exit_point = np.asarray(data['exit_point'], dtype=int)
+        entry_point = data['entry_point']
+        exit_point = data['exit_point']
         stacks_mask = np.asarray(data['stacks_mask'], dtype=bool)
         walls_mask = np.asarray(data['walls_mask'], dtype=bool)
-        item_points = np.asarray(data['item_points'], dtype=int)
+        item_points = data['item_points']
 
         stacks_roi = get_mask_roi(stacks_mask)
         walls_roi = get_mask_roi(walls_mask)
@@ -185,7 +186,7 @@ class WayFinder:
         result = {}
         for i, way in enumerate(ways):
             self._check_way(way)
-            result[f'{i}'] = way
+            result[f'{i}'] = [tuple(p) for p in way]
         return result
 
     def _get_ways_between_points(self, points):
@@ -206,8 +207,8 @@ class WayFinder:
         for pts_idx, way in zip(point_indices, ways):
             self._check_way(way)
             min_idx, max_idx = np.min(pts_idx), np.max(pts_idx)
-            result[f'{min_idx}{max_idx}'] = way
-            result[f'{max_idx}{min_idx}'] = way
+            result[f'{min_idx}{max_idx}'] = [tuple(p) for p in way]
+            result[f'{max_idx}{min_idx}'] = [tuple(p) for p in reversed(way)]
 
         return result
 
@@ -219,7 +220,7 @@ class WayFinder:
 
         self._logger.info('Finding the best way from the exit point to each item')
         if self._entry_point[0] == self._exit_point[0] and self._entry_point[1] == self._exit_point[1]:
-            ways_from_item_to_exit = ways_from_entry_to_item.copy()
+            ways_from_item_to_exit = {k: list(reversed(v)) for k, v in ways_from_entry_to_item.items()}
         else:
             ways_from_item_to_exit = self._get_ways_from_one_point_to_others(main_point=self._exit_point,
                                                                              another_points=self._item_points,
@@ -231,24 +232,33 @@ class WayFinder:
         self._logger.info('Getting best way')
         number_of_items = len(self._item_points)
         point_indices = list(range(number_of_items))
-        full_ways = []
+
+        ways = []
         metrics = []
         for pts_idx in permutations(point_indices, number_of_items):
-            full_ways.append(ways_from_entry_to_item[f'{pts_idx[0]}'])
+            full_way = [ways_from_entry_to_item[f'{pts_idx[0]}']]
 
             for i in range(number_of_items - 1):
                 start_point_idx = pts_idx[i]
                 finish_point_idx = pts_idx[i + 1]
-                full_ways.append(ways_between_items[f'{start_point_idx}{finish_point_idx}'])
+                full_way.append(ways_between_items[f'{start_point_idx}{finish_point_idx}'])
 
-            full_ways.append(ways_from_item_to_exit[f'{pts_idx[-1]}'])
-            total_points_in_way = 0
-            for way in full_ways:
-                total_points_in_way += len(way)
-            metrics.append(total_points_in_way)
+            full_way.append(ways_from_item_to_exit[f'{pts_idx[-1]}'])
+
+            total_points = 0
+            flatted_way = []
+            for w in full_way:
+                total_points += len(w)
+                flatted_way.extend([p for p in w])
+
+            metrics.append(total_points)
+            ways.append(flatted_way)
 
         best_way_idx = np.argmin(metrics)
-        best_way = full_ways[best_way_idx]
+        best_way = ways[best_way_idx]
 
-        self._logger.info(best_way)
+        self._logger.info(f'Best way: {best_way}')
+        self._logger.info('Visualization...')
+        self._visualizer.show(self._warehouse_data, way=best_way)
+
         return best_way
