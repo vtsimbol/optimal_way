@@ -366,25 +366,6 @@ class WarehouseAnnotator:
                         self._last_mouse_point = []
                         break
 
-            # elif key == ord(self._select_mode_definitions[self.Mode.DRAW_STACK]):
-            #     self._current_mode = self.Mode.DRAW_STACK
-            #     self._last_mouse_point = []
-            # elif key == ord(self._select_mode_definitions[self.Mode.CLEAR_STACK_OR_WALL]):
-            #     self._current_mode = self.Mode.CLEAR_STACK_OR_WALL
-            #     self._last_mouse_point = []
-            # elif key == ord(self._select_mode_definitions[self.Mode.SET_ENTRY]):
-            #     self._current_mode = self.Mode.SET_ENTRY
-            #     self._last_mouse_point = []
-            # elif key == ord(self._select_mode_definitions[self.Mode.SET_EXIT]):
-            #     self._current_mode = self.Mode.SET_EXIT
-            #     self._last_mouse_point = []
-            # elif key == ord(self._select_mode_definitions[self.Mode.SET_ITEMS]):
-            #     self._current_mode = self.Mode.SET_ITEMS
-            #     self._last_mouse_point = []
-            # elif key == ord(self._select_mode_definitions[self.Mode.SET_WALLS]):
-            #     self._current_mode = self.Mode.SET_WALLS
-            #     self._last_mouse_point = []
-
 
 if __name__ == '__main__':
     output_dir = args.output_dir if args.output_dir is not None else str(Path(__file__).parent)
